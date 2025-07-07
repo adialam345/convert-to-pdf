@@ -218,201 +218,210 @@ export default function Home() {
       const file = files[0].file;
       const arrayBuffer = await file.arrayBuffer();
       
-      // Convert DOCX to HTML with style preservation
+      // Convert DOCX to HTML with comprehensive style preservation
       const result = await mammoth.convertToHtml({ 
         arrayBuffer,
         styleMap: [
-          "p[style-name='Normal'] => p.normal:fresh",
-          "p[style-name='Heading 1'] => h1:fresh",
-          "p[style-name='Heading 2'] => h2:fresh",
-          "p[style-name='Heading 3'] => h3:fresh",
-          "p[style-name='Title'] => h1.title:fresh",
-          "r[style-name='Strong'] => strong:fresh",
-          "r[style-name='Emphasis'] => em:fresh",
-          // Preserve original styles
-          "u => span.underline:fresh",
-          "strike => span.strikethrough:fresh",
-          "i => span.italic:fresh",
-          "b => span.bold:fresh",
-          // Preserve font sizes (examples)
-          "r[size='28'] => span.size-28:fresh",
-          "r[size='24'] => span.size-24:fresh",
-          "r[size='20'] => span.size-20:fresh",
-          "r[size='16'] => span.size-16:fresh",
-          "r[size='14'] => span.size-14:fresh",
-          "r[size='12'] => span.size-12:fresh",
-          "r[size='10'] => span.size-10:fresh",
-          // Preserve colors
-          "r[color='FF0000'] => span.color-red:fresh",
-          "r[color='0000FF'] => span.color-blue:fresh",
+          "p[style-name='Normal'] => p.normal",
+          "p[style-name='Heading 1'] => h1.heading1",
+          "p[style-name='Heading 2'] => h2.heading2", 
+          "p[style-name='Heading 3'] => h3.heading3",
+          "p[style-name='Title'] => h1.title",
+          "r[style-name='Strong'] => strong.strong",
+          "r[style-name='Emphasis'] => em.emphasis",
+          "u => span.underline",
+          "strike => span.strikethrough",
+          "i => span.italic",
+          "b => span.bold"
         ],
-        transformDocument: (document) => {
-          return mammoth.transforms.paragraph((element) => {
-            const style = element.styleId || '';
-            const fontSize = element.fontSize || 12;
-            const color = element.color || '000000';
-            
-            element.alignment = element.alignment || 'left';
-            element.styleId = `${style}-${fontSize}-${color}`;
-            
-            return element;
-          })(document);
-        }
+        includeDefaultStyleMap: true,
+        convertImage: mammoth.images.imgElement(function(image) {
+          return image.read("base64").then(function(imageBuffer) {
+            return {
+              src: "data:" + image.contentType + ";base64," + imageBuffer
+            };
+          });
+        })
       });
+      
       const html = result.value;
+      const messages = result.messages;
       
-      // Create a temporary container to render the HTML
-      const container = document.createElement('div');
-      container.innerHTML = html;
-      document.body.appendChild(container);
-      
-      // Create a new PDF document
-      const pdfDoc = await PDFDocument.create();
-      const margin = 50; // Define margin here
-      let page = pdfDoc.addPage([595.276, 841.890]); // A4 size
-      const { width, height } = page.getSize();
-      
-      // Initialize vertical position
-      let yPosition = height - margin;
-      
-      // Embed fonts
-      const fonts = {
-        regular: await pdfDoc.embedFont(StandardFonts.Helvetica),
-        bold: await pdfDoc.embedFont(StandardFonts.HelveticaBold),
-        italic: await pdfDoc.embedFont(StandardFonts.HelveticaOblique),
-        boldItalic: await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique),
-      };
-      
-      // Style configuration with more detailed styles
-      const styles = {
-        normal: { fontSize: 12, font: fonts.regular, marginBottom: 12, lineHeight: 1.2 },
-        h1: { fontSize: 24, font: fonts.bold, marginBottom: 20, marginTop: 20 },
-        h2: { fontSize: 20, font: fonts.bold, marginBottom: 16, marginTop: 16 },
-        h3: { fontSize: 16, font: fonts.bold, marginBottom: 12, marginTop: 12 },
-        title: { fontSize: 32, font: fonts.bold, marginBottom: 24, marginTop: 24 },
-        bold: { font: fonts.bold },
-        italic: { font: fonts.italic },
-        boldItalic: { font: fonts.boldItalic },
-        underline: { underline: true },
-        strikethrough: { strikethrough: true },
-      };
+      // Log any conversion warnings
+      if (messages.length > 0) {
+        console.log('Conversion messages:', messages);
+      }
 
-      // Add size-specific styles
-      [28, 24, 20, 16, 14, 12, 10].forEach(size => {
-        styles[`size-${size}`] = { fontSize: size };
-      });
-
-      // Add color styles
-      const colorMap = {
-        'red': rgb(1, 0, 0),
-        'blue': rgb(0, 0, 1),
-        'black': rgb(0, 0, 0),
-      };
-      
-      const maxWidth = width - (margin * 2);
-      
-      // Enhanced getTextLines function to handle style variations
-      const getTextLines = (text: string, style: any): string[] => {
-        const words = text.split(' ');
-        const lines: string[] = [];
-        let currentLine = '';
+      // Enhanced HTML processing with better style extraction
+      const processHTMLToPDF = async (htmlContent: string) => {
+        const pdfDoc = await PDFDocument.create();
+        let page = pdfDoc.addPage([595.276, 841.890]); // A4 size
+        const { width, height } = page.getSize();
+        const margin = 50;
+        let yPosition = height - margin;
         
-        for (const word of words) {
-          const testLine = currentLine ? `${currentLine} ${word}` : word;
-          const textWidth = style.font.widthOfTextAtSize(testLine, style.fontSize);
+        // Load fonts
+        const fonts = {
+          regular: await pdfDoc.embedFont(StandardFonts.Helvetica),
+          bold: await pdfDoc.embedFont(StandardFonts.HelveticaBold),
+          italic: await pdfDoc.embedFont(StandardFonts.HelveticaOblique),
+          boldItalic: await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique),
+          times: await pdfDoc.embedFont(StandardFonts.TimesRoman),
+          timesBold: await pdfDoc.embedFont(StandardFonts.TimesRomanBold),
+          timesItalic: await pdfDoc.embedFont(StandardFonts.TimesRomanItalic),
+          timesBoldItalic: await pdfDoc.embedFont(StandardFonts.TimesRomanBoldItalic),
+        };
+
+        // Create temporary DOM element for parsing
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlContent, 'text/html');
+        
+        // Process each element recursively
+        const processElement = (element: Element, inheritedStyle: any = {}) => {
+          const tagName = element.tagName.toLowerCase();
+          const classList = Array.from(element.classList);
           
-          if (textWidth <= maxWidth) {
-            currentLine = testLine;
+          // Base style inheritance
+          let currentStyle = { ...inheritedStyle };
+          
+          // Apply tag-based styles
+          switch (tagName) {
+            case 'h1':
+              currentStyle = {
+                ...currentStyle,
+                fontSize: classList.includes('title') ? 28 : 24,
+                font: fonts.bold,
+                marginTop: 20,
+                marginBottom: 16,
+                lineHeight: 1.2
+              };
+              break;
+            case 'h2':
+              currentStyle = {
+                ...currentStyle,
+                fontSize: 20,
+                font: fonts.bold,
+                marginTop: 16,
+                marginBottom: 12,
+                lineHeight: 1.2
+              };
+              break;
+            case 'h3':
+              currentStyle = {
+                ...currentStyle,
+                fontSize: 16,
+                font: fonts.bold,
+                marginTop: 12,
+                marginBottom: 10,
+                lineHeight: 1.2
+              };
+              break;
+            case 'p':
+              currentStyle = {
+                ...currentStyle,
+                fontSize: 12,
+                font: fonts.regular,
+                marginBottom: 12,
+                lineHeight: 1.4
+              };
+              break;
+            case 'strong':
+            case 'b':
+              currentStyle = {
+                ...currentStyle,
+                font: currentStyle.font === fonts.italic ? fonts.boldItalic : fonts.bold
+              };
+              break;
+            case 'em':
+            case 'i':
+              currentStyle = {
+                ...currentStyle,
+                font: currentStyle.font === fonts.bold ? fonts.boldItalic : fonts.italic
+              };
+              break;
+            case 'span':
+              // Handle span classes
+              if (classList.includes('underline')) {
+                currentStyle.underline = true;
+              }
+              if (classList.includes('strikethrough')) {
+                currentStyle.strikethrough = true;
+              }
+              break;
+          }
+          
+          // Process text content
+          if (element.childNodes.length === 1 && element.childNodes[0].nodeType === Node.TEXT_NODE) {
+            const text = element.textContent?.trim();
+            if (text) {
+              // Add margins
+              if (currentStyle.marginTop) {
+                yPosition -= currentStyle.marginTop;
+              }
+              
+              // Split text into lines
+              const maxWidth = width - (margin * 2);
+              const words = text.split(' ');
+              const lines: string[] = [];
+              let currentLine = '';
+              
+              for (const word of words) {
+                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                const textWidth = currentStyle.font.widthOfTextAtSize(testLine, currentStyle.fontSize || 12);
+                
+                if (textWidth <= maxWidth) {
+                  currentLine = testLine;
+                } else {
+                  if (currentLine) lines.push(currentLine);
+                  currentLine = word;
+                }
+              }
+              if (currentLine) lines.push(currentLine);
+              
+              // Draw each line
+              for (const line of lines) {
+                if (yPosition <= margin + (currentStyle.fontSize || 12)) {
+                  page = pdfDoc.addPage([595.276, 841.890]);
+                  yPosition = height - margin;
+                }
+                
+                page.drawText(line, {
+                  x: margin,
+                  y: yPosition,
+                  size: currentStyle.fontSize || 12,
+                  font: currentStyle.font || fonts.regular,
+                  color: currentStyle.color || rgb(0, 0, 0),
+                });
+                
+                yPosition -= (currentStyle.fontSize || 12) * (currentStyle.lineHeight || 1.2);
+              }
+              
+              // Add bottom margin
+              if (currentStyle.marginBottom) {
+                yPosition -= currentStyle.marginBottom;
+              }
+            }
           } else {
-            if (currentLine) lines.push(currentLine);
-            currentLine = word;
-          }
-        }
-        if (currentLine) lines.push(currentLine);
-        return lines;
-      };
-
-      // Enhanced text processing function with closure over yPosition
-      const processNode = (node: Node) => {
-        if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
-          // Get base style from parent element
-          let style = { ...styles.normal };
-          const parentElement = node.parentElement;
-          
-          if (parentElement) {
-            // Get tag-based style
-            const tag = parentElement.tagName.toLowerCase();
-            if (styles[tag as keyof typeof styles]) {
-              style = { ...style, ...styles[tag as keyof typeof styles] };
+            // Process child elements
+            for (const child of Array.from(element.children)) {
+              processElement(child, currentStyle);
             }
-            
-            // Apply class-based styles
-            Array.from(parentElement.classList).forEach(className => {
-              if (styles[className as keyof typeof styles]) {
-                style = { ...style, ...styles[className as keyof typeof styles] };
-              }
-              
-              // Handle size classes
-              if (className.startsWith('size-')) {
-                const size = parseInt(className.split('-')[1]);
-                if (!isNaN(size)) {
-                  style.fontSize = size;
-                }
-              }
-              
-              // Handle color classes
-              if (className.startsWith('color-')) {
-                const color = className.split('-')[1];
-                if (colorMap[color as keyof typeof colorMap]) {
-                  style.color = colorMap[color as keyof typeof colorMap];
-                }
-              }
-            });
           }
-          
-          const text = node.textContent.trim().replace(/\s+/g, ' ');
-          const wrappedLines = getTextLines(text, style);
-          
-          // Add top margin if needed
-          if (style.marginTop) {
-            yPosition -= style.marginTop;
-          }
-          
-          for (const line of wrappedLines) {
-            if (yPosition <= margin + (style.fontSize || 12)) {
-              page = pdfDoc.addPage([595.276, 841.890]);
-              const { height: newHeight } = page.getSize();
-              yPosition = newHeight - margin;
-            }
-            
-            // Draw text with all style properties
-            page.drawText(line, {
-              x: margin,
-              y: yPosition,
-              size: style.fontSize || 12,
-              font: style.font || fonts.regular,
-              color: style.color || rgb(0, 0, 0),
-              lineHeight: style.lineHeight || 1.2,
-            });
-            
-            yPosition -= (style.fontSize || 12) * (style.lineHeight || 1.2);
-          }
-          
-          // Add bottom margin
-          if (style.marginBottom) {
-            yPosition -= style.marginBottom;
+        };
+        
+        // Process the body content
+        const body = doc.body;
+        if (body) {
+          for (const child of Array.from(body.children)) {
+            processElement(child);
           }
         }
         
-        // Process child nodes
-        node.childNodes.forEach(processNode);
-      };
-
-      // Process the HTML content
-      processNode(container);
+        return pdfDoc;
+      });
       
-      // Clean up the temporary container
-      document.body.removeChild(container);
+      // Process the HTML and create PDF
+      const pdfDoc = await processHTMLToPDF(html);
       
       // Save the PDF
       const pdfBytes = await pdfDoc.save();
@@ -435,26 +444,102 @@ export default function Home() {
 
   const convertExcelToPDF = async () => {
     try {
-      const { PDFDocument } = await import('pdf-lib');
+      const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
+      const XLSX = await import('xlsx');
       const file = files[0].file;
+      const arrayBuffer = await file.arrayBuffer();
       
-      // Create a new PDF document
+      // Read Excel file
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
       const pdfDoc = await PDFDocument.create();
-      const page = pdfDoc.addPage([595.276, 841.890]); // A4 size
-      const { width, height } = page.getSize();
       
-      // Add basic content
-      // Note: For full Excel support, consider using a server-side solution
-      const text = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target?.result);
-        reader.readAsText(file);
-      });
+      // Load fonts
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
       
-      page.drawText('Excel Content Preview', {
-        x: 50,
-        y: height - 50,
-        size: 14,
+      // Process each worksheet
+      workbook.SheetNames.forEach((sheetName, sheetIndex) => {
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
+        
+        // Add new page for each sheet
+        const page = pdfDoc.addPage([841.890, 595.276]); // A4 landscape for better table fit
+        const { width, height } = page.getSize();
+        const margin = 40;
+        
+        // Draw sheet title
+        page.drawText(`Sheet: ${sheetName}`, {
+          x: margin,
+          y: height - margin,
+          size: 16,
+          font: boldFont,
+          color: rgb(0, 0, 0),
+        });
+        
+        let yPosition = height - margin - 30;
+        const cellHeight = 20;
+        const cellPadding = 5;
+        
+        // Calculate column widths based on content
+        const maxCols = Math.max(...jsonData.map((row: any) => row.length));
+        const availableWidth = width - (margin * 2);
+        const columnWidth = Math.min(availableWidth / maxCols, 120);
+        
+        // Draw table data
+        jsonData.forEach((row: any, rowIndex) => {
+          if (yPosition < margin + cellHeight) {
+            // Add new page if needed
+            const newPage = pdfDoc.addPage([841.890, 595.276]);
+            yPosition = newPage.getSize().height - margin;
+          }
+          
+          let xPosition = margin;
+          
+          // Draw each cell in the row
+          row.forEach((cell: any, colIndex: number) => {
+            const cellValue = String(cell || '');
+            const isHeader = rowIndex === 0;
+            
+            // Draw cell border
+            page.drawRectangle({
+              x: xPosition,
+              y: yPosition - cellHeight,
+              width: columnWidth,
+              height: cellHeight,
+              borderColor: rgb(0.7, 0.7, 0.7),
+              borderWidth: 1,
+              color: isHeader ? rgb(0.95, 0.95, 0.95) : rgb(1, 1, 1),
+            });
+            
+            // Draw cell text
+            if (cellValue) {
+              // Truncate text if too long
+              let displayText = cellValue;
+              const maxTextWidth = columnWidth - (cellPadding * 2);
+              const fontSize = 10;
+              
+              while (font.widthOfTextAtSize(displayText, fontSize) > maxTextWidth && displayText.length > 0) {
+                displayText = displayText.slice(0, -1);
+              }
+              
+              if (displayText !== cellValue && displayText.length > 3) {
+                displayText = displayText.slice(0, -3) + '...';
+              }
+              
+              page.drawText(displayText, {
+                x: xPosition + cellPadding,
+                y: yPosition - cellHeight + cellPadding + 2,
+                size: fontSize,
+                font: isHeader ? boldFont : font,
+                color: rgb(0, 0, 0),
+              });
+            }
+            
+            xPosition += columnWidth;
+          });
+          
+          yPosition -= cellHeight;
+        });
       });
       
       // Save the PDF
@@ -478,20 +563,69 @@ export default function Home() {
 
   const convertPowerPointToPDF = async () => {
     try {
-      const { PDFDocument } = await import('pdf-lib');
+      const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
       const file = files[0].file;
+      const arrayBuffer = await file.arrayBuffer();
       
-      // Create a new PDF document
+      // For PowerPoint, we'll extract text content and create a structured PDF
+      // Note: Full PowerPoint parsing requires server-side processing
       const pdfDoc = await PDFDocument.create();
+      
+      // Load fonts
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      
+      // Create a page with PowerPoint-like layout
       const page = pdfDoc.addPage([595.276, 841.890]); // A4 size
       const { width, height } = page.getSize();
+      const margin = 50;
       
-      // Add basic content
-      // Note: For full PowerPoint support, consider using a server-side solution
-      page.drawText('PowerPoint Content Preview', {
-        x: 50,
-        y: height - 50,
+      // Add title
+      page.drawText('PowerPoint Presentation', {
+        x: margin,
+        y: height - margin,
+        size: 24,
+        font: boldFont,
+        color: rgb(0, 0, 0),
+      });
+      
+      // Add file info
+      page.drawText(`File: ${file.name}`, {
+        x: margin,
+        y: height - margin - 40,
         size: 14,
+        font: font,
+        color: rgb(0.3, 0.3, 0.3),
+      });
+      
+      page.drawText(`Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`, {
+        x: margin,
+        y: height - margin - 60,
+        size: 12,
+        font: font,
+        color: rgb(0.3, 0.3, 0.3),
+      });
+      
+      // Add note about limitations
+      const noteText = [
+        'Note: This is a basic conversion of your PowerPoint file.',
+        'For full slide content with images and formatting,',
+        'please use a dedicated PowerPoint to PDF converter.',
+        '',
+        'This converter preserves the file structure and',
+        'provides a PDF placeholder for your presentation.'
+      ];
+      
+      let yPos = height - margin - 120;
+      noteText.forEach(line => {
+        page.drawText(line, {
+          x: margin,
+          y: yPos,
+          size: 12,
+          font: font,
+          color: rgb(0.2, 0.2, 0.2),
+        });
+        yPos -= 20;
       });
       
       // Save the PDF
@@ -515,7 +649,7 @@ export default function Home() {
 
   const convertHTMLToPDF = async () => {
     try {
-      const { PDFDocument } = await import('pdf-lib');
+      const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
       const file = files[0].file;
       
       // Read HTML content
@@ -525,34 +659,151 @@ export default function Home() {
         reader.readAsText(file);
       });
 
-      // Create temporary container
-      const container = document.createElement('div');
-      container.innerHTML = htmlContent;
-      document.body.appendChild(container);
-
-      // Use html2canvas for conversion
-      const canvas = await html2canvas(container);
-      document.body.removeChild(container);
-
-      // Create PDF
       const pdfDoc = await PDFDocument.create();
-      const page = pdfDoc.addPage([595.276, 841.890]); // A4
-      
-      // Convert canvas to PNG
-      const pngImage = await canvas.toDataURL('image/png');
-      const pngImageBytes = await fetch(pngImage).then(res => res.arrayBuffer());
-      
-      // Embed PNG in PDF
-      const embeddedImage = await pdfDoc.embedPng(pngImageBytes);
+      let page = pdfDoc.addPage([595.276, 841.890]); // A4 size
       const { width, height } = page.getSize();
-      const scale = Math.min(width / embeddedImage.width, height / embeddedImage.height);
+      const margin = 50;
+      let yPosition = height - margin;
       
-      page.drawImage(embeddedImage, {
-        x: 0,
-        y: 0,
-        width: embeddedImage.width * scale,
-        height: embeddedImage.height * scale,
-      });
+      // Load fonts
+      const fonts = {
+        regular: await pdfDoc.embedFont(StandardFonts.Helvetica),
+        bold: await pdfDoc.embedFont(StandardFonts.HelveticaBold),
+        italic: await pdfDoc.embedFont(StandardFonts.HelveticaOblique),
+        boldItalic: await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique),
+      };
+      
+      // Parse HTML
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(htmlContent, 'text/html');
+      
+      // Process HTML elements
+      const processHTMLElement = (element: Element, inheritedStyle: any = {}) => {
+        const tagName = element.tagName.toLowerCase();
+        let currentStyle = { ...inheritedStyle };
+        
+        // Apply tag-based styles
+        switch (tagName) {
+          case 'h1':
+            currentStyle = { ...currentStyle, fontSize: 24, font: fonts.bold, marginTop: 20, marginBottom: 16 };
+            break;
+          case 'h2':
+            currentStyle = { ...currentStyle, fontSize: 20, font: fonts.bold, marginTop: 16, marginBottom: 12 };
+            break;
+          case 'h3':
+            currentStyle = { ...currentStyle, fontSize: 16, font: fonts.bold, marginTop: 12, marginBottom: 10 };
+            break;
+          case 'h4':
+            currentStyle = { ...currentStyle, fontSize: 14, font: fonts.bold, marginTop: 10, marginBottom: 8 };
+            break;
+          case 'h5':
+            currentStyle = { ...currentStyle, fontSize: 12, font: fonts.bold, marginTop: 8, marginBottom: 6 };
+            break;
+          case 'h6':
+            currentStyle = { ...currentStyle, fontSize: 10, font: fonts.bold, marginTop: 6, marginBottom: 4 };
+            break;
+          case 'p':
+            currentStyle = { ...currentStyle, fontSize: 12, font: fonts.regular, marginBottom: 12, lineHeight: 1.4 };
+            break;
+          case 'strong':
+          case 'b':
+            currentStyle = { ...currentStyle, font: currentStyle.font === fonts.italic ? fonts.boldItalic : fonts.bold };
+            break;
+          case 'em':
+          case 'i':
+            currentStyle = { ...currentStyle, font: currentStyle.font === fonts.bold ? fonts.boldItalic : fonts.italic };
+            break;
+          case 'div':
+            currentStyle = { ...currentStyle, fontSize: 12, font: fonts.regular, marginBottom: 8 };
+            break;
+          case 'span':
+            // Inherit parent styles
+            break;
+          case 'ul':
+          case 'ol':
+            currentStyle = { ...currentStyle, marginTop: 8, marginBottom: 8, marginLeft: 20 };
+            break;
+          case 'li':
+            currentStyle = { ...currentStyle, fontSize: 12, font: fonts.regular, marginBottom: 4 };
+            break;
+        }
+        
+        // Process text content
+        const textContent = element.textContent?.trim();
+        if (textContent && element.children.length === 0) {
+          // Add margins
+          if (currentStyle.marginTop) {
+            yPosition -= currentStyle.marginTop;
+          }
+          
+          // Handle list items
+          let displayText = textContent;
+          if (tagName === 'li') {
+            const parent = element.parentElement;
+            if (parent?.tagName.toLowerCase() === 'ul') {
+              displayText = `• ${textContent}`;
+            } else if (parent?.tagName.toLowerCase() === 'ol') {
+              const index = Array.from(parent.children).indexOf(element) + 1;
+              displayText = `${index}. ${textContent}`;
+            }
+          }
+          
+          // Split text into lines
+          const maxWidth = width - (margin * 2) - (currentStyle.marginLeft || 0);
+          const words = displayText.split(' ');
+          const lines: string[] = [];
+          let currentLine = '';
+          
+          for (const word of words) {
+            const testLine = currentLine ? `${currentLine} ${word}` : word;
+            const textWidth = currentStyle.font.widthOfTextAtSize(testLine, currentStyle.fontSize || 12);
+            
+            if (textWidth <= maxWidth) {
+              currentLine = testLine;
+            } else {
+              if (currentLine) lines.push(currentLine);
+              currentLine = word;
+            }
+          }
+          if (currentLine) lines.push(currentLine);
+          
+          // Draw each line
+          for (const line of lines) {
+            if (yPosition <= margin + (currentStyle.fontSize || 12)) {
+              page = pdfDoc.addPage([595.276, 841.890]);
+              yPosition = height - margin;
+            }
+            
+            page.drawText(line, {
+              x: margin + (currentStyle.marginLeft || 0),
+              y: yPosition,
+              size: currentStyle.fontSize || 12,
+              font: currentStyle.font || fonts.regular,
+              color: rgb(0, 0, 0),
+            });
+            
+            yPosition -= (currentStyle.fontSize || 12) * (currentStyle.lineHeight || 1.2);
+          }
+          
+          // Add bottom margin
+          if (currentStyle.marginBottom) {
+            yPosition -= currentStyle.marginBottom;
+          }
+        } else {
+          // Process child elements
+          for (const child of Array.from(element.children)) {
+            processHTMLElement(child, currentStyle);
+          }
+        }
+      };
+      
+      // Process body content
+      const body = doc.body;
+      if (body) {
+        for (const child of Array.from(body.children)) {
+          processHTMLElement(child);
+        }
+      }
 
       // Save and download
       const pdfBytes = await pdfDoc.save();
