@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from 'react';
-import { Upload, Download, X, FileImage, Settings, Zap, Sparkles, FileText, FileSpreadsheet, FilePresentation } from 'lucide-react';
+import { Upload, Download, X, FileImage, Settings, Zap, Sparkles, FileText, FileSpreadsheet, Presentation, FileCode } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,7 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { motion, AnimatePresence } from 'framer-motion';
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
 import jsPDF from 'jspdf';
 
 interface File {
@@ -212,67 +212,286 @@ export default function Home() {
   };
 
   const convertWordToPDF = async () => {
-    // Implementasi konversi Word ke PDF akan ditambahkan
-    const docxPdf = require('docx-pdf');
-    const file = files[0].file;
-    const reader = new FileReader();
+    try {
+      const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
+      const mammoth = await import('mammoth');
+      const file = files[0].file;
+      const arrayBuffer = await file.arrayBuffer();
+      
+      // Convert DOCX to HTML with custom style map
+      const result = await mammoth.convertToHtml({ 
+        arrayBuffer,
+        styleMap: [
+          "p[style-name='Heading 1'] => h1:fresh",
+          "p[style-name='Heading 2'] => h2:fresh",
+          "p[style-name='Heading 3'] => h3:fresh",
+          "p[style-name='Title'] => h1.title:fresh",
+        ],
+      });
+      const html = result.value;
+      
+      // Create a temporary container to render the HTML
+      const container = document.createElement('div');
+      container.innerHTML = html;
+      document.body.appendChild(container);
+      
+      // Create a new PDF document
+      const pdfDoc = await PDFDocument.create();
+      let page = pdfDoc.addPage([595.276, 841.890]); // A4 size
+      const { width, height } = page.getSize();
+      
+      // Embed fonts
+      const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      
+      // Style configuration
+      const styles = {
+        h1: { fontSize: 24, font: boldFont, marginBottom: 20, marginTop: 20 },
+        h2: { fontSize: 20, font: boldFont, marginBottom: 16, marginTop: 16 },
+        h3: { fontSize: 16, font: boldFont, marginBottom: 12, marginTop: 12 },
+        p: { fontSize: 12, font: regularFont, marginBottom: 12, lineHeight: 1.4 },
+        title: { fontSize: 32, font: boldFont, marginBottom: 24, marginTop: 24 },
+      };
+      
+      const margin = 50;
+      const maxWidth = width - (margin * 2);
+      
+      // Function to split text into lines that fit within maxWidth
+      const getTextLines = (text: string, style: { fontSize: number, font: any }): string[] => {
+        const words = text.split(' ');
+        const lines: string[] = [];
+        let currentLine = '';
+        
+        for (const word of words) {
+          const testLine = currentLine ? `${currentLine} ${word}` : word;
+          const textWidth = style.font.widthOfTextAtSize(testLine, style.fontSize);
+          
+          if (textWidth <= maxWidth) {
+            currentLine = testLine;
+          } else {
+            if (currentLine) lines.push(currentLine);
+            currentLine = word;
+          }
+        }
+        if (currentLine) lines.push(currentLine);
+        return lines;
+      };
 
-    reader.onload = async (e) => {
-      const buffer = e.target?.result;
-      if (buffer) {
-        const outputPath = 'converted-word.pdf';
-        await docxPdf(buffer, outputPath);
-        // Trigger download
-      }
-    };
+      // Process each text node in the HTML
+      let yPosition = height - margin;
+      
+      const processNode = (node: Node) => {
+        if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
+          // Get the appropriate style based on parent element
+          let style = styles.p;
+          const parentTag = node.parentElement?.tagName.toLowerCase();
+          
+          if (parentTag && styles[parentTag as keyof typeof styles]) {
+            style = styles[parentTag as keyof typeof styles];
+            
+            // Special handling for title class
+            if (parentTag === 'h1' && node.parentElement?.classList.contains('title')) {
+              style = styles.title;
+            }
+          }
+          
+          const text = node.textContent.trim().replace(/\s+/g, ' ');
+          const wrappedLines = getTextLines(text, style);
+          
+          // Add top margin if it's a heading or first element
+          if (parentTag && ['h1', 'h2', 'h3'].includes(parentTag)) {
+            yPosition -= style.marginTop;
+          }
+          
+          for (const line of wrappedLines) {
+            if (yPosition <= margin + style.fontSize) {
+              // Add a new page if we run out of space
+              page = pdfDoc.addPage([595.276, 841.890]);
+              const { height: newHeight } = page.getSize();
+              yPosition = newHeight - margin;
+            }
+            
+            page.drawText(line, {
+              x: margin,
+              y: yPosition,
+              size: style.fontSize,
+              font: style.font,
+              color: rgb(0, 0, 0),
+              lineHeight: style.lineHeight || 1,
+            });
+            yPosition -= style.fontSize * (style.lineHeight || 1);
+          }
+          
+          // Add bottom margin
+          yPosition -= style.marginBottom;
+        }
+        
+        // Process child nodes
+        node.childNodes.forEach(processNode);
+      };
 
-    reader.readAsArrayBuffer(file);
+      // Process the HTML content
+      processNode(container);
+      
+      // Clean up the temporary container
+      document.body.removeChild(container);
+      
+      // Save the PDF
+      const pdfBytes = await pdfDoc.save();
+      
+      // Download the PDF
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${file.name.replace(/\.[^/.]+$/, '')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error converting Word to PDF:', error);
+      throw error;
+    }
   };
 
   const convertExcelToPDF = async () => {
-    // Implementasi konversi Excel ke PDF akan ditambahkan
-    const ExcelJS = require('exceljs');
-    const workbook = new ExcelJS.Workbook();
-    const file = files[0].file;
-
-    const buffer = await file.arrayBuffer();
-    await workbook.xlsx.load(buffer);
-
-    // Convert to PDF using PDFKit
-    const PDFDocument = require('pdfkit');
-    const doc = new PDFDocument();
-    // Implementasi konversi worksheet ke PDF
-    doc.pipe(require('fs').createWriteStream('converted-excel.pdf'));
-    doc.end();
+    try {
+      const { PDFDocument } = await import('pdf-lib');
+      const file = files[0].file;
+      
+      // Create a new PDF document
+      const pdfDoc = await PDFDocument.create();
+      const page = pdfDoc.addPage([595.276, 841.890]); // A4 size
+      const { width, height } = page.getSize();
+      
+      // Add basic content
+      // Note: For full Excel support, consider using a server-side solution
+      const text = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result);
+        reader.readAsText(file);
+      });
+      
+      page.drawText('Excel Content Preview', {
+        x: 50,
+        y: height - 50,
+        size: 14,
+      });
+      
+      // Save the PDF
+      const pdfBytes = await pdfDoc.save();
+      
+      // Download the PDF
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${file.name.replace(/\.[^/.]+$/, '')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error converting Excel to PDF:', error);
+      throw error;
+    }
   };
 
   const convertPowerPointToPDF = async () => {
-    // Implementasi konversi PowerPoint ke PDF akan ditambahkan
-    const pptxgen = require('pptxgenjs');
-    const pres = new pptxgen();
-    const file = files[0].file;
-
-    // Load and convert
-    const buffer = await file.arrayBuffer();
-    // Implementasi konversi ke PDF
+    try {
+      const { PDFDocument } = await import('pdf-lib');
+      const file = files[0].file;
+      
+      // Create a new PDF document
+      const pdfDoc = await PDFDocument.create();
+      const page = pdfDoc.addPage([595.276, 841.890]); // A4 size
+      const { width, height } = page.getSize();
+      
+      // Add basic content
+      // Note: For full PowerPoint support, consider using a server-side solution
+      page.drawText('PowerPoint Content Preview', {
+        x: 50,
+        y: height - 50,
+        size: 14,
+      });
+      
+      // Save the PDF
+      const pdfBytes = await pdfDoc.save();
+      
+      // Download the PDF
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${file.name.replace(/\.[^/.]+$/, '')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error converting PowerPoint to PDF:', error);
+      throw error;
+    }
   };
 
   const convertHTMLToPDF = async () => {
-    // Implementasi konversi HTML ke PDF akan ditambahkan
-    const htmlPdf = require('html-pdf-node');
-    const file = files[0].file;
-    const reader = new FileReader();
+    try {
+      const { PDFDocument } = await import('pdf-lib');
+      const file = files[0].file;
+      
+      // Read HTML content
+      const htmlContent = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.readAsText(file);
+      });
 
-    reader.onload = async (e) => {
-      const content = e.target?.result;
-      if (content) {
-        const options = { format: 'A4' };
-        const pdf = await htmlPdf.generatePdf({ content }, options);
-        // Trigger download
-      }
-    };
+      // Create temporary container
+      const container = document.createElement('div');
+      container.innerHTML = htmlContent;
+      document.body.appendChild(container);
 
-    reader.readAsText(file);
+      // Use html2canvas for conversion
+      const canvas = await html2canvas(container);
+      document.body.removeChild(container);
+
+      // Create PDF
+      const pdfDoc = await PDFDocument.create();
+      const page = pdfDoc.addPage([595.276, 841.890]); // A4
+      
+      // Convert canvas to PNG
+      const pngImage = await canvas.toDataURL('image/png');
+      const pngImageBytes = await fetch(pngImage).then(res => res.arrayBuffer());
+      
+      // Embed PNG in PDF
+      const embeddedImage = await pdfDoc.embedPng(pngImageBytes);
+      const { width, height } = page.getSize();
+      const scale = Math.min(width / embeddedImage.width, height / embeddedImage.height);
+      
+      page.drawImage(embeddedImage, {
+        x: 0,
+        y: 0,
+        width: embeddedImage.width * scale,
+        height: embeddedImage.height * scale,
+      });
+
+      // Save and download
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${file.name.replace(/\.[^/.]+$/, '')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+    } catch (error) {
+      console.error('Error converting HTML to PDF:', error);
+      throw error;
+    }
   };
 
   const clearAll = () => {
@@ -306,7 +525,7 @@ export default function Home() {
       case 'excel':
         return <FileSpreadsheet className="w-4 h-4" />;
       case 'powerpoint':
-        return <FilePresentation className="w-4 h-4" />;
+        return <Presentation className="w-4 h-4" />;
       case 'html':
         return <FileText className="w-4 h-4" />;
       default:
@@ -374,7 +593,7 @@ export default function Home() {
                 <span className="hidden sm:inline">Excel</span>
               </TabsTrigger>
               <TabsTrigger value="powerpoint" className="flex items-center gap-2">
-                <FilePresentation className="w-4 h-4" />
+                <Presentation className="w-4 h-4" />
                 <span className="hidden sm:inline">PowerPoint</span>
               </TabsTrigger>
               <TabsTrigger value="html" className="flex items-center gap-2">
